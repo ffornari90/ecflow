@@ -48,6 +48,31 @@ static std::string the_check_mode(ecf::CheckPt::Mode mode) {
 // This can be overridden by calling "server --ecfinterval 3" for test purposes
 const int defaultSubmitJobsInterval = 60;
 
+namespace ecf {
+
+// Parse a comma-separated list of roles (e.g. from ECF_ADMIN_ROLES) into a trimmed list of role names.
+std::vector<std::string> parse_admin_roles(const std::string& value) {
+    std::vector<std::string> roles;
+    std::string::size_type start = 0;
+    while (start <= value.size()) {
+        auto comma = value.find(',', start);
+        auto end   = (comma == std::string::npos) ? value.size() : comma;
+        auto token = value.substr(start, end - start);
+        auto b     = token.find_first_not_of(" \t");
+        auto e     = token.find_last_not_of(" \t");
+        if (b != std::string::npos) {
+            roles.push_back(token.substr(b, e - b + 1));
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return roles;
+}
+
+} // namespace ecf
+
 ////////////////////////////////////////////////////////////////////////////////////////////
 // class ServerEnvironment:
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -428,6 +453,7 @@ bool ServerEnvironment::enable_whitelist_based_permissions(std::string& error) c
             std::cout << "*** Server permissions based on white list file, loaded from '" << ecf_white_list_file_
                       << "'\n";
             authorisation_service_ = result.value();
+            authorisation_service_.set_admin_roles(ecf::parse_admin_roles(admin_roles_));
             return true;
         }
         else {
@@ -455,6 +481,7 @@ bool ServerEnvironment::enable_node_based_permissions(std::string& error) const 
 
     if (auto result = AuthorisationService::load_permissions_from_nodes(); result.ok()) {
         authorisation_service_ = result.value();
+        authorisation_service_.set_admin_roles(ecf::parse_admin_roles(admin_roles_));
         std::cout << "*** Server permissions based on ECF_PERMISSIONS\n";
         return true;
     }
@@ -469,6 +496,7 @@ bool ServerEnvironment::enable_node_based_permissions(std::string& error) const 
 bool ServerEnvironment::enable_unrestricted_permissions(std::string& error) const {
     if (auto result = AuthorisationService::load_permissions_unrestricted(); result.ok()) {
         authorisation_service_ = result.value();
+        authorisation_service_.set_admin_roles(ecf::parse_admin_roles(admin_roles_));
         std::cout << "*** Server permissions based on unrestricted permissions\n";
         return true;
     }
@@ -549,6 +577,7 @@ void ServerEnvironment::read_config_file(std::string& log_file_name, const std::
             ("ECF_TASK_THRESHOLD", po::value<int>(&the_task_threshold)->default_value(JobProfiler::task_threshold_default()), "The defaults thresholds when profiling job generation")
             ("ECF_PRUNE_NODE_LOG", po::value<int>(&ecf_prune_node_log_)->default_value(30), "Node log, older than 180 days automatically pruned when checkpoint file loaded")
             (ecf::environment::ECF_PERMISSIONS,po::value<std::string>(&permissions_)->default_value(""), "")
+            (ecf::environment::ECF_ADMIN_ROLES,po::value<std::string>(&admin_roles_)->default_value(""), "Comma-separated list of roles that grant global administrator privileges")
         ;
 
         // clang-format on
@@ -713,6 +742,7 @@ std::string ServerEnvironment::dump() const {
 #endif
 
     ss << ecf::environment::ECF_PERMISSIONS << " = " << permissions_ << "\n";
+    ss << ecf::environment::ECF_ADMIN_ROLES << " = " << admin_roles_ << "\n";
 
     ss << white_list_file_.dump_valid_users();
     return ss.str();

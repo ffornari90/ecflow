@@ -22,7 +22,8 @@ Result<Permissions> Permissions::make_from_variable(const std::string& value) {
         return Result<Permissions>::success(Permissions::make_empty());
     }
 
-    // Expecting a comma-separated list of user/permissions, e.g. "USER1:RWXO,USER2:R"
+    // Expecting a comma-separated list of principal/permissions, e.g. "USER1:RWXO,USER2:R,@ops:RWX"
+    // A principal prefixed with '@' denotes a role, otherwise it denotes an individual user.
 
     std::vector<std::string> entries;
     ecf::algorithm::split_fields_at(entries, value, ",");
@@ -33,7 +34,7 @@ Result<Permissions> Permissions::make_from_variable(const std::string& value) {
         ecf::algorithm::split_fields_at(user_permissions, entry, ":");
         if (user_permissions.size() != 2) {
             return Result<Permissions>::failure("Invalid permission entry: " + entry +
-                                                ". Expected format: <user>:<rwxo>");
+                                                ". Expected format: <user>:<rwxos> or @<role>:<rwxos>");
         }
 
         const auto& first  = user_permissions[0];
@@ -46,11 +47,21 @@ Result<Permissions> Permissions::make_from_variable(const std::string& value) {
             return Result<Permissions>::failure("Invalid permission entry: empty permissions are not allowed");
         }
 
-        auto username = Username{first};
+        // A leading '@' denotes a role (rather than an individual user), e.g. "@ops:rwx"
+        const bool is_role          = (first.front() == '@');
+        const std::string principal = is_role ? first.substr(1) : first;
+        if (principal.empty()) {
+            return Result<Permissions>::failure("Invalid permission entry: empty role name is not allowed");
+        }
 
         try {
             auto perms = allowed_from_string(second);
-            allowed.emplace_back(username, perms);
+            if (is_role) {
+                allowed.push_back(Permission::for_role(principal, perms));
+            }
+            else {
+                allowed.emplace_back(Username{principal}, perms);
+            }
         }
         catch (const InvalidPermissionValue& e) {
             return Result<Permissions>::failure("Invalid permission value in entry: " + entry + ". " + e.what());
@@ -98,7 +109,7 @@ Permissions Permissions::combine_supersede(const Permissions& active, const Perm
     // Then, we retain the non-sticky permissions from the current permissions
     for (auto&& permission : current.allowed_) {
         auto found = std::find_if(
-            std::begin(result), std::end(result), [&](auto&& p) { return p.username() == permission.username(); });
+            std::begin(result), std::end(result), [&](auto&& p) { return p.same_principal(permission); });
 
         if (found == std::end(result)) {
             // If the user is not in listed as sticky, we add the permission
@@ -133,10 +144,10 @@ Permissions Permissions::combine_override(const Permissions& active, const Permi
         else {
             if (auto found = std::find_if(std::begin(current.allowed_),
                                           std::end(current.allowed_),
-                                          [&](auto&& p) { return p.username() == permission.username(); });
+                                          [&](auto&& p) { return p.same_principal(permission); });
                 found != std::end(current.allowed_)) {
                 // When non-sticky permissions are overridden in current, we combine the permissions
-                result.push_back(Permission{permission.username(), permission.allowed() & found->allowed()});
+                result.push_back(permission.with_allowed(permission.allowed() & found->allowed()));
             }
         }
     }

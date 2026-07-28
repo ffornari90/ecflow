@@ -90,9 +90,24 @@ public:
 
     void init(const Permissions& permissions);
 
+    /**
+     * Configure the set of roles that grant global administrator privileges.
+     *
+     * An identity that possesses any of these roles is allowed to perform any action, on any path,
+     * regardless of the active node/white-list permissions. This is the mechanism by which an
+     * administrator can manage and delegate the whole server (see ECF_ADMIN_ROLES).
+     *
+     * @param roles the administrator roles (typically parsed from ECF_ADMIN_ROLES)
+     */
+    void set_admin_roles(std::vector<std::string> roles);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    std::vector<std::string> admin_roles_;
+
+    [[nodiscard]] bool has_admin_role(const Identity& identity) const;
 
     AuthorisationService(std::unique_ptr<Impl>&& impl);
 };

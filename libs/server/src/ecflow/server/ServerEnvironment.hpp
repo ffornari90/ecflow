@@ -235,6 +235,7 @@ private:
     int submitJobsInterval_;
     int ecf_prune_node_log_;
     std::string permissions_;
+    std::string admin_roles_;
     bool jobGeneration_; // used in debug/test mode only
     ecf::Protocol protocol_;
     bool debug_;

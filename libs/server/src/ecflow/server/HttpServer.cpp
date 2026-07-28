@@ -84,6 +84,7 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
         bool found_bearer_security = false;
         std::string username;
         std::string password;
+        std::vector<std::string> roles;
         {
             auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
                 return field.name_string() == "X-Auth-Username";
@@ -100,6 +101,33 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
             if (found != std::end(request)) {
                 found_header_password = true;
                 password              = std::string{found->value()};
+            }
+        }
+        {
+            // The X-Auth-Roles header carries the comma-separated roles asserted by the external
+            // Authentication mechanism (e.g. the edge auth service / reverse proxy). These roles are
+            // trusted and used, alongside the username, when evaluating node permissions.
+            auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
+                return field.name_string() == "X-Auth-Roles";
+            });
+            if (found != std::end(request)) {
+                auto value                   = std::string{found->value()};
+                std::string::size_type start = 0;
+                while (start <= value.size()) {
+                    auto comma = value.find(',', start);
+                    auto end   = (comma == std::string::npos) ? value.size() : comma;
+                    auto token = value.substr(start, end - start);
+                    // Trim surrounding whitespace
+                    auto b = token.find_first_not_of(" \t");
+                    auto e = token.find_last_not_of(" \t");
+                    if (b != std::string::npos) {
+                        roles.push_back(token.substr(b, e - b + 1));
+                    }
+                    if (comma == std::string::npos) {
+                        break;
+                    }
+                    start = comma + 1;
+                }
             }
         }
         {
@@ -144,12 +172,12 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
         if (found_bearer_security && found_header_username) {
             LOG_DEBUG("HttpServer::handle_request",
                       "Identity extracted from HTTP(s) request header (Authorisation: Bearer)");
-            identity = ecf::Identity::make_secure_user(username);
+            identity = ecf::Identity::make_secure_user(username, roles);
         }
         else if (found_basic_security && found_header_username) {
             LOG_DEBUG("HttpServer::handle_request",
                       "Identity extracted from HTTP(s) request header (Authorization: Basic)");
-            identity = ecf::Identity::make_secure_user(username);
+            identity = ecf::Identity::make_secure_user(username, roles);
         }
         else if (!found_basic_security && found_bearer_security && found_header_username && found_header_password) {
             LOG_DEBUG("HttpServer::handle_request",

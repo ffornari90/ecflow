@@ -42,6 +42,7 @@ This cookbook will provide real examples of using the ecFlow :ref:`python_api`.
    how_to_trigger_a_task_based_on_aviso_notification
    how_to_use_ecFlow_with_http
    how_to_setup_ecFlow_with_https_authentication
+   how_to_delegate_suite_execution_with_oidc_roles
 
 **Experimental Recipes**
 

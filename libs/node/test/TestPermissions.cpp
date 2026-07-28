@@ -347,6 +347,128 @@ BOOST_AUTO_TEST_CASE(can_detect_invalid_permission_values) {
     }
 }
 
+BOOST_AUTO_TEST_CASE(can_do_role_permissions) {
+    ECF_NAME_THIS_TEST();
+    using namespace ecf;
+    using namespace std::string_literals;
+
+    Defs d;
+    auto s = d.add_suite("s1");
+    s->addVariable(Variable(ecf::environment::ECF_PERMISSIONS, "@ops:rwx,@analysts:r"));
+    auto f = s->add_family("f1");
+    // Restrict the family to @ops only: @analysts must lose access here
+    f->addVariable(Variable(ecf::environment::ECF_PERMISSIONS, "@ops:rwx"));
+    f->add_task("t1");
+
+    // A sticky server-level grant, so that node-based rules are active
+    d.server_state().add_or_update_server_variable(ecf::environment::ECF_PERMISSIONS, "a:rwxos");
+
+    AuthorisationService service = AuthorisationService::load_permissions_from_nodes().value();
+
+    // Externally authenticated identities carrying roles (as supplied via X-Auth-Roles)
+    auto ops     = Identity::make_secure_user("bob", Roles{"ops"});
+    auto analyst = Identity::make_secure_user("carol", Roles{"analysts"});
+    auto both    = Identity::make_secure_user("dave", Roles{"analysts", "ops"});
+    auto nobody  = Identity::make_secure_user("erin");
+
+    {
+        // At suite level: @ops -> rwx, @analysts -> read-only
+        const auto& path = "/s1"s;
+
+        BOOST_CHECK(service.allows(ops, d, path, Allowed::READ));
+        BOOST_CHECK(service.allows(ops, d, path, Allowed::WRITE));
+        BOOST_CHECK(service.allows(ops, d, path, Allowed::EXECUTE));
+        BOOST_CHECK(!service.allows(ops, d, path, Allowed::OWNER));
+
+        BOOST_CHECK(service.allows(analyst, d, path, Allowed::READ));
+        BOOST_CHECK(!service.allows(analyst, d, path, Allowed::WRITE));
+        BOOST_CHECK(!service.allows(analyst, d, path, Allowed::EXECUTE));
+
+        // An identity holding both roles is granted by the most permissive matching entry
+        BOOST_CHECK(service.allows(both, d, path, Allowed::READ));
+        BOOST_CHECK(service.allows(both, d, path, Allowed::WRITE));
+        BOOST_CHECK(service.allows(both, d, path, Allowed::EXECUTE));
+
+        // An identity with neither a matching username nor a matching role is denied
+        BOOST_CHECK(!service.allows(nobody, d, path, Allowed::READ));
+        BOOST_CHECK(!service.allows(nobody, d, path, Allowed::WRITE));
+    }
+
+    {
+        // At the task under the restricted family: @ops keeps rwx, @analysts is removed
+        const auto& path = "/s1/f1/t1"s;
+
+        BOOST_CHECK(service.allows(ops, d, path, Allowed::READ));
+        BOOST_CHECK(service.allows(ops, d, path, Allowed::WRITE));
+        BOOST_CHECK(service.allows(ops, d, path, Allowed::EXECUTE));
+
+        BOOST_CHECK(!service.allows(analyst, d, path, Allowed::READ));
+        BOOST_CHECK(!service.allows(analyst, d, path, Allowed::WRITE));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(admin_roles_bypass_permissions) {
+    ECF_NAME_THIS_TEST();
+    using namespace ecf;
+    using namespace std::string_literals;
+
+    Defs d;
+    auto s = d.add_suite("s1");
+    s->add_family("f1")->add_task("t1");
+
+    // Node-based rules are active (server-level grant is non-empty), and only @ops is granted rwx
+    d.server_state().add_or_update_server_variable(ecf::environment::ECF_PERMISSIONS, "@ops:rwx");
+
+    AuthorisationService service = AuthorisationService::load_permissions_from_nodes().value();
+    service.set_admin_roles({"ecflow-admins"});
+
+    auto admin  = Identity::make_secure_user("root", Roles{"ecflow-admins"});
+    auto ops    = Identity::make_secure_user("bob", Roles{"ops"});
+    auto nobody = Identity::make_secure_user("eve");
+
+    const auto& path = "/"s;
+
+    // An administrator role bypasses the node rules entirely, including OWNER (granted to no one)
+    BOOST_CHECK(service.allows(admin, d, path, Allowed::READ));
+    BOOST_CHECK(service.allows(admin, d, path, Allowed::WRITE));
+    BOOST_CHECK(service.allows(admin, d, path, Allowed::EXECUTE));
+    BOOST_CHECK(service.allows(admin, d, path, Allowed::OWNER));
+
+    // A regular role is still bound by the node rules
+    BOOST_CHECK(service.allows(ops, d, path, Allowed::READ));
+    BOOST_CHECK(service.allows(ops, d, path, Allowed::WRITE));
+    BOOST_CHECK(service.allows(ops, d, path, Allowed::EXECUTE));
+    BOOST_CHECK(!service.allows(ops, d, path, Allowed::OWNER));
+
+    // An identity with no matching grant and no admin role is denied
+    BOOST_CHECK(!service.allows(nobody, d, path, Allowed::READ));
+    BOOST_CHECK(!service.allows(nobody, d, path, Allowed::WRITE));
+}
+
+BOOST_AUTO_TEST_CASE(can_detect_valid_role_permission_values) {
+    ECF_NAME_THIS_TEST();
+    using namespace ecf;
+    using namespace std::string_literals;
+
+    std::array perms = {"@ops:rwx"s, "@ops:rwx,alice:r"s, "@a:r,@b:w"s, "@ops:rwxos"s};
+    for (const auto& actual : perms) {
+        BOOST_CHECK_MESSAGE(Permissions::make_from_variable(actual).ok(),
+                            ">" << actual << "< has valid role permission format");
+    }
+}
+
+BOOST_AUTO_TEST_CASE(can_detect_invalid_role_permission_values) {
+    ECF_NAME_THIS_TEST();
+    using namespace ecf;
+    using namespace std::string_literals;
+
+    std::array perms = {"@:rwx"s, "@ops:"s, "@ops:rwZ"s};
+    for (const auto& actual : perms) {
+        BOOST_CHECK_MESSAGE(!Permissions::make_from_variable(actual).ok(),
+                            ">" << actual << "< has invalid role permission format");
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

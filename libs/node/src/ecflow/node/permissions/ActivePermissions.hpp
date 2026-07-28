@@ -35,13 +35,18 @@ public:
 
     [[nodiscard]] bool is_none() const { return permissions_.is_empty(); }
 
-    [[nodiscard]] bool allows(const Username& username, Allowed permission) const {
-        return is_none() || permissions_.allows(username, permission);
+    [[nodiscard]] bool allows(const Username& username, const Roles& roles, Allowed permission) const {
+        return is_none() || permissions_.allows(username, roles, permission);
         // The above means that when there are no active rules, everything is allowed!
         // Only when there are active rules, the user permissions are effectively checked.
         //
         // This design choice is considered dangerous, as a misconfigured server becomes essentially open!
         //   But this is backward-compatible!
+    }
+
+    /// Convenience overload for an identity that carries no roles.
+    [[nodiscard]] bool allows(const Username& username, Allowed permission) const {
+        return allows(username, no_roles(), permission);
     }
 
     /**

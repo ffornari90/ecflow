@@ -13,8 +13,32 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace ecf {
+
+///
+/// @brief The set of roles associated with an identity.
+///
+/// Roles are coarse-grained labels (e.g. "ops", "analysts") asserted by an
+/// external Authentication mechanism (e.g. carried in the `X-Auth-Roles` header
+/// set by the edge authentication service). They are used, alongside the
+/// username, when evaluating node permissions, enabling an administrator to
+/// delegate access to a whole group of users at once (see `@role` entries in
+/// ECF_PERMISSIONS).
+///
+using Roles = std::vector<std::string>;
+
+///
+/// @brief Returns a shared empty set of roles.
+///
+/// Used by identity kinds that never carry roles (i.e. every kind except
+/// `SecureUserX`), avoiding a per-object allocation.
+///
+inline const Roles& no_roles() {
+    static const Roles empty{};
+    return empty;
+}
 
 ///
 /// @brief Strongly-typed wrapper for a user login name.
@@ -98,6 +122,7 @@ public:
 
     virtual const Username& username() const = 0;
     virtual const Password& password() const = 0;
+    virtual const Roles& roles() const       = 0;
 
     virtual std::string as_string() const = 0;
 };
@@ -115,6 +140,7 @@ public:
 
     [[nodiscard]] const Username& username() const override { return id_.username(); }
     [[nodiscard]] const Password& password() const override { return id_.password(); }
+    [[nodiscard]] const Roles& roles() const override { return id_.roles(); }
 
     [[nodiscard]] std::string as_string() const override { return id_.as_string(); }
 
@@ -129,6 +155,7 @@ class None {
 public:
     [[nodiscard]] const Username& username() const { return empty_username; }
     [[nodiscard]] const Password& password() const { return empty_password; }
+    [[nodiscard]] const Roles& roles() const { return no_roles(); }
 
     [[nodiscard]] std::string as_string() const { return "None"; }
 
@@ -152,6 +179,7 @@ public:
 
     [[nodiscard]] const Username& username() const { return username_; }
     [[nodiscard]] const Password& password() const { return password_; }
+    [[nodiscard]] const Roles& roles() const { return no_roles(); }
 
     [[nodiscard]] std::string as_string() const { return "{UserX: " + username_.value() + "}"; }
 
@@ -177,6 +205,7 @@ public:
 
     [[nodiscard]] const Username& username() const { return username_; }
     [[nodiscard]] const Password& password() const { return password_; }
+    [[nodiscard]] const Roles& roles() const { return no_roles(); }
 
     [[nodiscard]] std::string as_string() const { return "{CustomUserX: " + username_.value() + "}"; }
 
@@ -199,16 +228,19 @@ private:
 ///
 class SecureUserX {
 public:
-    explicit SecureUserX(std::string username)
-        : username_(std::move(username)) {}
+    explicit SecureUserX(std::string username, Roles roles = {})
+        : username_(std::move(username)),
+          roles_(std::move(roles)) {}
 
     [[nodiscard]] const Username& username() const { return username_; }
     [[nodiscard]] const Password& password() const { return empty; }
+    [[nodiscard]] const Roles& roles() const { return roles_; }
 
     [[nodiscard]] std::string as_string() const { return "{SecuredUserX: " + username_.value() + "}"; }
 
 private:
     Username username_;
+    Roles roles_;
     inline static Password empty{""};
 };
 
@@ -228,6 +260,7 @@ public:
 
     [[nodiscard]] const Username& username() const { return pid_; }
     [[nodiscard]] const Password& password() const { return pass_; }
+    [[nodiscard]] const Roles& roles() const { return no_roles(); }
 
     [[nodiscard]] std::string as_string() const {
         return "{TaskX: " + pid_.value() + ":" + pass_.value() + ":" + tryno_ + "}";
@@ -278,8 +311,8 @@ public:
     [[nodiscard]] static Identity make_custom_user(const std::string& username, const std::string& password) {
         return Identity{CustomUserX{username, password}};
     }
-    [[nodiscard]] static Identity make_secure_user(const std::string& username) {
-        return Identity{SecureUserX{username}};
+    [[nodiscard]] static Identity make_secure_user(const std::string& username, Roles roles = {}) {
+        return Identity{SecureUserX{username, std::move(roles)}};
     }
 
     [[nodiscard]] static Identity make_task(const std::string& pid, const std::string& pass, const std::string& tryno) {
@@ -313,6 +346,7 @@ public:
 
     [[nodiscard]] const Username& username() const { return handle_->username(); }
     [[nodiscard]] const Password& password() const { return handle_->password(); }
+    [[nodiscard]] const Roles& roles() const { return handle_->roles(); }
 
     [[nodiscard]] std::string as_string() const { return handle_->as_string(); }
 

@@ -10,6 +10,8 @@
 
 #include "ecflow/server/AuthorisationService.hpp"
 
+#include <algorithm>
+
 #include "ecflow/base/AbstractServer.hpp"
 #include "ecflow/core/Overload.hpp"
 #include "ecflow/core/WhiteListFile.hpp"
@@ -37,14 +39,16 @@ AuthorisationService::AuthorisationService(std::unique_ptr<Impl>&& impl)
 }
 
 AuthorisationService::AuthorisationService(AuthorisationService&& rhs) noexcept
-    : impl_{std::move(rhs.impl_)} {
+    : impl_{std::move(rhs.impl_)},
+      admin_roles_{std::move(rhs.admin_roles_)} {
 }
 
 AuthorisationService::~AuthorisationService() = default;
 
 AuthorisationService& AuthorisationService::operator=(AuthorisationService&& rhs) noexcept {
     if (this != &rhs) {
-        impl_ = std::move(rhs.impl_);
+        impl_        = std::move(rhs.impl_);
+        admin_roles_ = std::move(rhs.admin_roles_);
     }
     return *this;
 }
@@ -71,6 +75,16 @@ bool AuthorisationService::content_varies_by_identity() const {
     return varies;
 }
 
+bool AuthorisationService::has_admin_role(const Identity& identity) const {
+    if (admin_roles_.empty()) {
+        return false;
+    }
+    const auto& roles = identity.roles();
+    return std::any_of(std::begin(roles), std::end(roles), [this](const std::string& role) {
+        return std::find(std::begin(admin_roles_), std::end(admin_roles_), role) != std::end(admin_roles_);
+    });
+}
+
 bool AuthorisationService::allows(const Identity& identity, const Defs& defs, Allowed required) const {
     return allows(identity, defs, paths_t{ROOT}, required);
 }
@@ -89,6 +103,12 @@ bool AuthorisationService::allows(const Identity& identity,
     if (!good()) {
         // When no rules are loaded, we allow everything...
         // Dangerous, but backward compatible!
+        return true;
+    }
+
+    // OURS: global administrators (identity carries an admin role) may perform any action, on any
+    // path. This is how an administrator manages the server and delegates suite execution to others.
+    if (has_admin_role(identity)) {
         return true;
     }
 
@@ -119,7 +139,9 @@ bool AuthorisationService::allows(const Identity& identity,
                                           << std::endl;
                                 std::cout << "*** [DBG] AuthorisationService::allows: User ["
                                           << identity.username().value() << "] " << active << std::endl;
-                                allowed = active.allows(identity.username(), required);
+                                // OURS: role-aware check -- match the caller's username AND any of
+                                // the roles carried on the verified OIDC identity.
+                                allowed = active.allows(identity.username(), identity.roles(), required);
                                 std::cout << "*** [DBG] AuthorisationService::allows: User ["
                                           << identity.username().value()
                                           << "] is allowed: " << (allowed ? "true" : "false") << std::endl;
@@ -155,6 +177,10 @@ void AuthorisationService::init(const Permissions& permissions) {
     else {
         impl_ = std::make_unique<AuthorisationService::Impl>(NodeRules{});
     }
+}
+
+void AuthorisationService::set_admin_roles(std::vector<std::string> roles) {
+    admin_roles_ = std::move(roles);
 }
 
 } // namespace ecf

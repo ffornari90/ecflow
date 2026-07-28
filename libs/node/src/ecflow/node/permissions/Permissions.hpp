@@ -39,11 +39,16 @@ public:
 
     [[nodiscard]] bool is_empty() const { return allowed_.empty(); }
 
-    [[nodiscard]] bool allows(const Username& username, Allowed permission) const {
+    [[nodiscard]] bool allows(const Username& username, const Roles& roles, Allowed permission) const {
         auto found = std::find_if(std::begin(allowed_), std::end(allowed_), [&](auto&& current) {
-            return current.allows(username, permission);
+            return current.allows(username, roles, permission);
         });
         return found != std::end(allowed_);
+    }
+
+    /// Convenience overload for an identity that carries no roles.
+    [[nodiscard]] bool allows(const Username& username, Allowed permission) const {
+        return allows(username, no_roles(), permission);
     }
 
     static Permissions combine_supersede(const Permissions& active, const Permissions& current);
@@ -53,7 +58,8 @@ public:
         using namespace std::string_literals;
         os << "Permissions: "s;
         for (auto&& permission : p.allowed_) {
-            os << "("s << permission.username().value() << ":"s << allowed_to_string(permission.allowed()) << ") "s;
+            os << "("s << (permission.is_role() ? "@"s : ""s) << permission.username().value() << ":"s
+               << allowed_to_string(permission.allowed()) << ") "s;
         }
         return os;
     }
