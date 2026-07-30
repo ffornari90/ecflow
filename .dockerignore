@@ -1,0 +1,8 @@
+# Keep the Docker build context small for the OIDC playground image.
+# Excludes local build artefacts and VCS metadata not needed to compile ecFlow.
+# Safe to keep untracked.
+.git
+.deploy
+/build
+cmake-build-*
+.vscode
