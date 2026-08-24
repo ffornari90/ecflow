@@ -54,6 +54,10 @@ ecbuild_info( "Locating Httplib" )
 set(HTTPLIB_DIR "${DEPENDENCIES_DIR}/cpp-httplib")
 find_package(Httplib REQUIRED)
 
+# jwt-cpp: header-only OIDC/JWT verification (in-server Bearer token validation)
+set(JWTCPP_DIR "${DEPENDENCIES_DIR}/jwt-cpp")
+find_package(JwtCpp REQUIRED)
+
 ecbuild_info( "Httplib details:" )
 ecbuild_info( " * HTTPLIB_FOUND        : ${HTTPLIB_FOUND}" )
 ecbuild_info( " * HTTPLIB_INCLUDE_DIRS : ${HTTPLIB_INCLUDE_DIRS}" )

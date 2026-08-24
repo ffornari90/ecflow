@@ -17,6 +17,7 @@
 #include <boost/beast.hpp>
 
 #include "ecflow/server/BaseServer.hpp"
+#include "ecflow/service/auth/OidcVerifier.hpp"
 
 /**
  * The HttpServer class accepts HTTP connections, which are dispatched to appropriate sessions that
@@ -31,12 +32,17 @@ private:
     BaseServer* server_;
     boost::asio::io_context& io_;
     boost::asio::ip::tcp::acceptor acceptor_;
+    // In-server OIDC Bearer-token verifier (null/disabled unless ECF_OIDC_* is configured).
+    std::unique_ptr<ecf::service::auth::OidcVerifier> oidc_verifier_;
 
 public:
     HttpServer(BaseServer* server, boost::asio::io_context& io, ServerEnvironment& env);
 
     std::string ssl() const { return ""; }
     BaseServer* server() const { return server_; }
+
+    /// The OIDC verifier for this server, or nullptr when OIDC is not configured.
+    const ecf::service::auth::OidcVerifier* oidc_verifier() const { return oidc_verifier_.get(); }
 
     void handle_terminate(bool terminate);
 

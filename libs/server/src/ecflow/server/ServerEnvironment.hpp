@@ -179,6 +179,14 @@ public:
     ecf::AuthorisationService& authorisation() { return authorisation_service_; }
     const ecf::AuthorisationService& authorisation() const { return authorisation_service_; }
 
+    // In-server OIDC (OpenID Connect) verification configuration (see ECF_OIDC_* in Environment.hpp).
+    // When issuer + jwks_uri are set, the built-in HTTP(S) server verifies Bearer tokens itself.
+    const std::string& oidc_issuer() const { return oidc_issuer_; }
+    const std::string& oidc_jwks_uri() const { return oidc_jwks_uri_; }
+    const std::string& oidc_audience() const { return oidc_audience_; }
+    const std::string& oidc_username_claim() const { return oidc_username_claim_; }
+    const std::string& oidc_roles_claim() const { return oidc_roles_claim_; }
+
     // const PasswdFile& passwd_file() const { return passwd_file_; }
     // const PasswdFile& passwd_custom_file() const { return passwd_custom_file_; }
 
@@ -236,6 +244,11 @@ private:
     int ecf_prune_node_log_;
     std::string permissions_;
     std::string admin_roles_;
+    std::string oidc_issuer_;
+    std::string oidc_jwks_uri_;
+    std::string oidc_audience_;
+    std::string oidc_username_claim_{"preferred_username"};
+    std::string oidc_roles_claim_{"realm_access.roles"};
     bool jobGeneration_; // used in debug/test mode only
     ecf::Protocol protocol_;
     bool debug_;

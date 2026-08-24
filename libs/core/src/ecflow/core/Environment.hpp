@@ -56,6 +56,16 @@ constexpr const char* ECF_CUSTOM_PASSWD   = "ECF_CUSTOM_PASSWD";
 constexpr const char* ECF_PERMISSIONS     = "ECF_PERMISSIONS";
 constexpr const char* ECF_ADMIN_ROLES     = "ECF_ADMIN_ROLES";
 
+// In-server OIDC (OpenID Connect) verification of HTTP(S) Bearer tokens.
+// When ECF_OIDC_ISSUER + ECF_OIDC_JWKS_URI are set, the server verifies the JWT
+// itself (signature vs the realm JWKS, issuer/expiry/audience) and derives the
+// caller's username + roles from the verified claims -- no external edge needed.
+constexpr const char* ECF_OIDC_ISSUER         = "ECF_OIDC_ISSUER";
+constexpr const char* ECF_OIDC_JWKS_URI       = "ECF_OIDC_JWKS_URI";
+constexpr const char* ECF_OIDC_AUDIENCE       = "ECF_OIDC_AUDIENCE";
+constexpr const char* ECF_OIDC_USERNAME_CLAIM = "ECF_OIDC_USERNAME_CLAIM";
+constexpr const char* ECF_OIDC_ROLES_CLAIM    = "ECF_OIDC_ROLES_CLAIM";
+
 constexpr const char* ECF_SSL  = "ECF_SSL";
 constexpr const char* ECF_USER = "ECF_USER";
 

@@ -20,6 +20,7 @@
 #include "ecflow/core/Log.hpp"
 #include "ecflow/core/ecflow_version.h"
 #include "ecflow/server/ServerEnvironment.hpp"
+#include "ecflow/service/auth/OidcVerifier.hpp"
 
 inline void log_error(char const* where, boost::beast::error_code ec) {
     using namespace ecf;
@@ -43,7 +44,8 @@ template <class Body, class Allocator>
 void handle_request(const boost::beast::http::request<Body, boost::beast::http::basic_fields<Allocator>>& request,
                     boost::beast::http::response<boost::beast::http::string_body>& response,
                     bool& is_terminate,
-                    BaseServer* server) {
+                    BaseServer* server,
+                    const ecf::service::auth::OidcVerifier* oidc) {
     using response_t = boost::beast::http::response<boost::beast::http::string_body>;
 
     // Returns a bad request response
@@ -52,6 +54,19 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
         response_t res{boost::beast::http::status::bad_request, request.version()};
         res.set(boost::beast::http::field::server, ECFLOW_VERSION);
         res.set(boost::beast::http::field::content_type, CONTENT_TYPE);
+        res.keep_alive(request.keep_alive());
+        res.body() = std::string(why);
+        res.prepare_payload();
+        return res;
+    };
+
+    // Returns a 401 Unauthorized response (used when in-server OIDC verification rejects a token)
+
+    auto const unauthorized = [&request](boost::beast::string_view why) {
+        response_t res{boost::beast::http::status::unauthorized, request.version()};
+        res.set(boost::beast::http::field::server, ECFLOW_VERSION);
+        res.set(boost::beast::http::field::content_type, CONTENT_TYPE);
+        res.set(boost::beast::http::field::www_authenticate, "Bearer");
         res.keep_alive(request.keep_alive());
         res.body() = std::string(why);
         res.prepare_payload();
@@ -77,59 +92,20 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
     {
         ecf::Identity identity = ecf::Identity::make_none();
 
-        // If possible, the Identify is retrieved from request header fields
-        bool found_header_username = false;
-        bool found_header_password = false;
+        // In-server authentication. The identity is derived FROM THE REQUEST ITSELF; no external
+        // edge (reverse proxy / auth service) is trusted, so the X-Auth-* request headers are
+        // deliberately IGNORED (with nothing in front of the server they would be trivially
+        // forgeable).
+        //   * Authorization: Bearer <jwt> -> the OIDC token is VERIFIED in-server (RS256 signature
+        //     against the Keycloak JWKS, plus issuer/expiry/audience); username + roles come from
+        //     the verified claims.
+        //   * Authorization: Basic <u:p>  -> classic credentials, checked in-server against passwd.
+        //   * otherwise                   -> the identity carried by the inbound command (native TCP).
         bool found_basic_security  = false;
         bool found_bearer_security = false;
         std::string username;
         std::string password;
         std::vector<std::string> roles;
-        {
-            auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
-                return field.name_string() == "X-Auth-Username";
-            });
-            if (found != std::end(request)) {
-                found_header_username = true;
-                username              = std::string{found->value()};
-            }
-        }
-        {
-            auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
-                return field.name_string() == "X-Auth-Password";
-            });
-            if (found != std::end(request)) {
-                found_header_password = true;
-                password              = std::string{found->value()};
-            }
-        }
-        {
-            // The X-Auth-Roles header carries the comma-separated roles asserted by the external
-            // Authentication mechanism (e.g. the edge auth service / reverse proxy). These roles are
-            // trusted and used, alongside the username, when evaluating node permissions.
-            auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
-                return field.name_string() == "X-Auth-Roles";
-            });
-            if (found != std::end(request)) {
-                auto value                   = std::string{found->value()};
-                std::string::size_type start = 0;
-                while (start <= value.size()) {
-                    auto comma = value.find(',', start);
-                    auto end   = (comma == std::string::npos) ? value.size() : comma;
-                    auto token = value.substr(start, end - start);
-                    // Trim surrounding whitespace
-                    auto b = token.find_first_not_of(" \t");
-                    auto e = token.find_last_not_of(" \t");
-                    if (b != std::string::npos) {
-                        roles.push_back(token.substr(b, e - b + 1));
-                    }
-                    if (comma == std::string::npos) {
-                        break;
-                    }
-                    start = comma + 1;
-                }
-            }
-        }
         {
             auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
                 return field.name_string() == "Authorization";
@@ -158,30 +134,35 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
                     password             = decoded.substr(colon_separator + 1, std::string::npos);
                 }
                 else if (tag == "Bearer") {
-                    // The Bearer tag is not handled in ecFlow, and the actual authentication is expected to be
-                    // performed by the reverse proxy.
+                    // Verify the OIDC access token in-server and derive identity + roles from the
+                    // VERIFIED claims. Reject (401) if verification fails or OIDC is not configured.
+                    if (oidc == nullptr || !oidc->enabled()) {
+                        response =
+                            unauthorized("Bearer token presented but in-server OIDC verification is not configured");
+                        return;
+                    }
+                    auto verified = oidc->verify(value);
+                    if (!verified) {
+                        response = unauthorized("Invalid, expired or untrusted OIDC token");
+                        return;
+                    }
+                    username              = verified->username;
+                    roles                 = verified->roles;
                     found_bearer_security = true;
                 }
                 else {
                     // If no Basic or Bearer tag, then ignore the Authorisation header,
-                    // and use the username and password from the inbound_request
+                    // and use the identity from the inbound_request
                 }
             }
         }
 
-        if (found_bearer_security && found_header_username) {
-            LOG_DEBUG("HttpServer::handle_request",
-                      "Identity extracted from HTTP(s) request header (Authorisation: Bearer)");
+        if (found_bearer_security) {
+            LOG_DEBUG("HttpServer::handle_request", "Identity from VERIFIED OIDC Bearer token: " << username);
             identity = ecf::Identity::make_secure_user(username, roles);
         }
-        else if (found_basic_security && found_header_username) {
-            LOG_DEBUG("HttpServer::handle_request",
-                      "Identity extracted from HTTP(s) request header (Authorization: Basic)");
-            identity = ecf::Identity::make_secure_user(username, roles);
-        }
-        else if (!found_basic_security && found_bearer_security && found_header_username && found_header_password) {
-            LOG_DEBUG("HttpServer::handle_request",
-                      "Identity extracted from HTTP(s) request header (X-Auth-Username/X-Auth-Password)");
+        else if (found_basic_security) {
+            LOG_DEBUG("HttpServer::handle_request", "Identity from Authorization: Basic (" << username << ")");
             identity = ecf::Identity::make_user(username, password);
         }
         else {
@@ -286,7 +267,7 @@ public:
         }
 
         // Handle actual request
-        handle_request(request_, response_, is_terminate_, owner_->server());
+        handle_request(request_, response_, is_terminate_, owner_->server(), owner_->oidc_verifier());
 
         // Send the response
         send_response();
@@ -329,6 +310,21 @@ HttpServer::HttpServer(BaseServer* server, boost::asio::io_context& io, ServerEn
       io_{io},
       acceptor_{io} {
     boost::beast::error_code ec;
+
+    // Configure in-server OIDC Bearer-token verification from the server environment.
+    // The verifier is only active when ECF_OIDC_ISSUER + ECF_OIDC_JWKS_URI are set.
+    {
+        ecf::service::auth::OidcVerifier::Config oidc_config;
+        oidc_config.issuer         = env.oidc_issuer();
+        oidc_config.jwks_uri       = env.oidc_jwks_uri();
+        oidc_config.audience       = env.oidc_audience();
+        oidc_config.username_claim = env.oidc_username_claim();
+        oidc_config.roles_claim    = env.oidc_roles_claim();
+        oidc_verifier_             = std::make_unique<ecf::service::auth::OidcVerifier>(std::move(oidc_config));
+        if (oidc_verifier_->enabled()) {
+            LOG(ecf::Log::MSG, "HttpServer: in-server OIDC verification enabled (issuer=" << env.oidc_issuer() << ")");
+        }
+    }
 
     boost::asio::ip::tcp::endpoint endpoint(env.tcp_protocol(), env.port());
 

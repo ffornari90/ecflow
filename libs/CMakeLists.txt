@@ -564,6 +564,7 @@ set(srcs
 
   # Service -- Headers
   service/src/ecflow/service/auth/Credentials.hpp
+  service/src/ecflow/service/auth/OidcVerifier.hpp
   service/src/ecflow/service/aviso/Aviso.hpp
   service/src/ecflow/service/aviso/AvisoService.hpp
   service/src/ecflow/service/aviso/etcd/Client.hpp
@@ -577,6 +578,7 @@ set(srcs
   service/src/ecflow/service/Registry.hpp
   # Service -- Sources
   service/src/ecflow/service/auth/Credentials.cpp
+  service/src/ecflow/service/auth/OidcVerifier.cpp
   service/src/ecflow/service/aviso/Aviso.cpp
   service/src/ecflow/service/aviso/AvisoService.cpp
   service/src/ecflow/service/aviso/etcd/Range.cpp
@@ -624,6 +626,7 @@ ecbuild_add_library(
     nlohmann::json
     cereal::cereal # this needs to be public as it appears in public header files used downstream
     httplib::httplib
+    jwt-cpp::jwt-cpp
     $<$<VERSION_LESS:${SELECTED_BOOST_VERSION},1.69.0>:Boost::system>
     Boost::date_time
     Boost::program_options

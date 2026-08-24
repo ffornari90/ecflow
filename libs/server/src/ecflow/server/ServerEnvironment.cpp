@@ -578,6 +578,11 @@ void ServerEnvironment::read_config_file(std::string& log_file_name, const std::
             ("ECF_PRUNE_NODE_LOG", po::value<int>(&ecf_prune_node_log_)->default_value(30), "Node log, older than 180 days automatically pruned when checkpoint file loaded")
             (ecf::environment::ECF_PERMISSIONS,po::value<std::string>(&permissions_)->default_value(""), "")
             (ecf::environment::ECF_ADMIN_ROLES,po::value<std::string>(&admin_roles_)->default_value(""), "Comma-separated list of roles that grant global administrator privileges")
+            (ecf::environment::ECF_OIDC_ISSUER,po::value<std::string>(&oidc_issuer_)->default_value(""), "OIDC issuer URL; when set (with ECF_OIDC_JWKS_URI) the server verifies Bearer tokens in-server")
+            (ecf::environment::ECF_OIDC_JWKS_URI,po::value<std::string>(&oidc_jwks_uri_)->default_value(""), "OIDC JWKS URI used to verify Bearer token signatures")
+            (ecf::environment::ECF_OIDC_AUDIENCE,po::value<std::string>(&oidc_audience_)->default_value(""), "Optional OIDC audience to enforce on Bearer tokens")
+            (ecf::environment::ECF_OIDC_USERNAME_CLAIM,po::value<std::string>(&oidc_username_claim_)->default_value("preferred_username"), "JWT claim to use as the username")
+            (ecf::environment::ECF_OIDC_ROLES_CLAIM,po::value<std::string>(&oidc_roles_claim_)->default_value("realm_access.roles"), "Dotted JWT claim path to the roles array")
         ;
 
         // clang-format on
@@ -743,6 +748,11 @@ std::string ServerEnvironment::dump() const {
 
     ss << ecf::environment::ECF_PERMISSIONS << " = " << permissions_ << "\n";
     ss << ecf::environment::ECF_ADMIN_ROLES << " = " << admin_roles_ << "\n";
+    ss << ecf::environment::ECF_OIDC_ISSUER << " = " << oidc_issuer_ << "\n";
+    ss << ecf::environment::ECF_OIDC_JWKS_URI << " = " << oidc_jwks_uri_ << "\n";
+    ss << ecf::environment::ECF_OIDC_AUDIENCE << " = " << oidc_audience_ << "\n";
+    ss << ecf::environment::ECF_OIDC_USERNAME_CLAIM << " = " << oidc_username_claim_ << "\n";
+    ss << ecf::environment::ECF_OIDC_ROLES_CLAIM << " = " << oidc_roles_claim_ << "\n";
 
     ss << white_list_file_.dump_valid_users();
     return ss.str();
