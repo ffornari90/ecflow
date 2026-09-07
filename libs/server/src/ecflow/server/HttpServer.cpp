@@ -73,16 +73,31 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
         return res;
     };
 
-    // Handle only POST requests
+    // Handle only POST requests.
+    // NOTE: the `return` is essential. Without it execution fell through to
+    // restore_from_string() below, which constructs a cereal::JSONInputArchive over an
+    // empty body and THROWS. That throw escaped handle_request() and on_read() into the
+    // asio completion handler, killing the connection with no HTTP response at all -
+    // which a reverse proxy reports as "502 upstream prematurely closed connection".
     if (request.method() != boost::beast::http::verb::post) {
         response = bad_request("Unknown HTTP-method");
+        return;
     }
 
     ClientToServerRequest inbound_request;
     ServerToClientResponse outbound_response;
 
-    // 1) Retrieve inbound_request from request body
-    ecf::restore_from_string(request.body(), inbound_request);
+    // 1) Retrieve inbound_request from request body.
+    // A body that is not a valid cereal archive (health check, port scan, stray GET
+    // turned POST) must produce a 400, never an exception out of the session.
+    try {
+        ecf::restore_from_string(request.body(), inbound_request);
+    }
+    catch (const std::exception& e) {
+        LOG_DEBUG("HttpServer::handle_request", "Malformed request body: " << e.what());
+        response = bad_request("Malformed request body");
+        return;
+    }
 
     for (auto& field : request) {
         LOG_DEBUG("HttpServer::handle_request",
@@ -266,8 +281,26 @@ public:
             return log_error("HttpSession::on_read", ec);
         }
 
-        // Handle actual request
-        handle_request(request_, response_, is_terminate_, owner_->server(), owner_->oidc_verifier());
+        // Handle actual request. A throw here must never escape into the asio
+        // completion handler - that closes the connection with no response and the
+        // proxy reports 502.
+        try {
+            handle_request(request_, response_, is_terminate_, owner_->server(), owner_->oidc_verifier());
+        }
+        catch (const std::exception& e) {
+            // NOTE: the only helper in this file is
+            //   inline void log_error(char const* where, boost::beast::error_code ec)
+            // (HttpServer.cpp:25) - it cannot take a string, so use LOG directly.
+            LOG(ecf::Log::ERR, "HttpSession::on_read: " << e.what());
+            response_ = {};
+            response_.result(boost::beast::http::status::internal_server_error);
+            response_.version(request_.version());
+            response_.set(boost::beast::http::field::server, ECFLOW_VERSION);
+            response_.set(boost::beast::http::field::content_type, CONTENT_TYPE);
+            response_.keep_alive(false);
+            response_.body() = "Internal server error";
+            response_.prepare_payload();
+        }
 
         // Send the response
         send_response();
@@ -289,8 +322,17 @@ public:
             return log_error("HttpSession::on_write", ec);
         }
 
-        // Finish off the connection
-        do_close();
+        // Honour keep-alive. Closing unconditionally broke reverse-proxy upstream
+        // keepalive pools: nginx would reuse a socket this server had already
+        // half-closed, producing intermittent 502s on valid POST /v1/ecflow requests.
+        if (!response_.keep_alive()) {
+            return do_close();
+        }
+
+        // Reset for the next request on this connection
+        response_ = {};
+        request_  = {};
+        do_read();
     }
 
     void do_close() {
