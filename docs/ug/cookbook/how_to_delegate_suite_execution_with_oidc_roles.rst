@@ -64,7 +64,15 @@ The ecFlow server is started with the HTTP(S) interface enabled:
 
 .. code-block:: shell
 
-   ecflow_server --http --ssl --port 3141
+   ecflow_server --http --port 3141
+
+.. note::
+
+   ``--ssl`` is **not** a valid option on the HTTP path: the server only ever
+   supports plain HTTP for its own listener (``ServerOptions.cpp`` never sets
+   ``Protocol::Https`` from it), and terminates TLS nowhere. Put a
+   TLS-terminating reverse proxy in front if HTTPS is required; the server
+   still verifies the bearer token itself either way.
 
 The server trusts requests that arrive with a ``Bearer`` (or ``Basic``) authorization
 header together with an ``X-Auth-Username`` header: it treats such a request as
@@ -171,7 +179,7 @@ A set of roles can be designated as **global administrators** through the
 
 .. code-block:: shell
 
-   ecflow_server --http --ssl \
+   ecflow_server --http \
        ECF_PERMISSIONS='@ops:rwx' \
        ECF_ADMIN_ROLES='ecflow-admins'
 
@@ -195,8 +203,9 @@ Client configuration
 No ecFlow client needs code changes; each simply presents an OIDC bearer token over
 HTTPS:
 
-- **Native** ``ecflow_client``: connect with ``--http --ssl`` (or ``--https``) and provide
-  the bearer token through the token file (``.ecflowapirc``) or ``ECF_AUTHTOKENS``.
+- **Native** ``ecflow_client``: connect with ``--http`` (or ``--https`` if a TLS-terminating
+  proxy sits in front of the server) and provide the bearer token through the token file
+  (``.ecflowapirc``) or ``ECF_AUTHTOKENS``.
 - **ecflow_ui**: add the server using the HTTPS connection method and supply the token.
 - **Standalone REST** (``ecflow_http``): forwards the authenticated identity (and its
   roles) to the server, so the same delegation rules apply.
@@ -210,7 +219,7 @@ Delegate a suite to the ``ops`` group while keeping ``analysts`` read-only, and 
 .. code-block:: shell
 
    # Server
-   ecflow_server --http --ssl \
+   ecflow_server --http \
        ECF_PERMISSIONS='@ops:rwx,@analysts:r' \
        ECF_ADMIN_ROLES='ecflow-admins'
 
