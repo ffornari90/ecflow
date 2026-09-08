@@ -130,13 +130,19 @@ bool AuthorisationService::allows(const Identity& identity,
                                 allowed = false;
                             }
                         },
-                        [&allowed, &defs, &identity, &paths, &required](const NodeRules& rules) {
+                        [&allowed, &defs, &identity, &paths, &required, this](const NodeRules& rules) {
                             for (auto&& path : paths) {
                                 ActivePermissions active = permissions_at(identity, defs, path);
                                 std::cout << "*** [DBG] AuthorisationService::allows: User ["
                                           << identity.username().value() << "] checking permissions for path [" << path
                                           << "] with required permissions [" << allowed_to_string(required) << "]"
                                           << std::endl;
+                                std::cout << "*** [DBG] AuthorisationService::allows: User ["
+                                          << identity.username().value() << "] roles=[";
+                                for (const auto& r : identity.roles()) { std::cout << r << " "; }
+                                std::cout << "] admin_roles=[";
+                                for (const auto& r : admin_roles_) { std::cout << r << " "; }
+                                std::cout << "]" << std::endl;
                                 std::cout << "*** [DBG] AuthorisationService::allows: User ["
                                           << identity.username().value() << "] " << active << std::endl;
                                 // OURS: role-aware check -- match the caller's username AND any of

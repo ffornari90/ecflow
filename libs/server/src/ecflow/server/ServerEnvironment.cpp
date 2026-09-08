@@ -182,9 +182,16 @@ void ServerEnvironment::init(const CommandLine& cl, const std::string& path_to_c
     }
 
     {
-        // Init the authorisation service
+        // Init the authorisation service.
+        //
+        // set_admin_roles() MUST be called here as well as in the enable_*_permissions()
+        // helpers: AuthorisationService::init() only replaces impl_, it does not touch
+        // admin_roles_, and this startup path never reaches those helpers. Without this
+        // line ECF_ADMIN_ROLES is silently ignored - has_admin_role() sees an empty list,
+        // the bypass never fires, and an administrator is refused by the node ACL.
         if (auto perms = Permissions::make_from_variable(permissions_); perms.ok()) {
             authorisation_service_.init(perms.value());
+            authorisation_service_.set_admin_roles(ecf::parse_admin_roles(admin_roles_));
         }
     }
 
