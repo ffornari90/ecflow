@@ -10,6 +10,9 @@
 
 #include "ecflow/server/HttpServer.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 #include <httplib.h>
 
 #include "ecflow/base/ClientToServerRequest.hpp"
@@ -122,9 +125,15 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
         std::string password;
         std::vector<std::string> roles;
         {
-            auto found = std::find_if(std::begin(request), std::end(request), [](auto& field) {
-                return field.name_string() == "Authorization";
-            });
+            // Look the header up by Beast's well-known field enum, NOT by string.
+            // HTTP header names are case-insensitive (RFC 7230 s3.2) and a reverse
+            // proxy is free to normalise them: nginx forwards "authorization" in
+            // lower case, so a `name_string() == "Authorization"` comparison silently
+            // failed behind the ingress. The request then fell through to the inbound
+            // command's identity ({UserX: ...}, no roles) instead of the verified OIDC
+            // one ({SecureUserX: ...} with realm roles), and every authenticated user
+            // was refused by the node ACL.
+            auto found = request.find(boost::beast::http::field::authorization);
             if (found != std::end(request)) {
 
                 auto header = std::string{found->value()};
@@ -140,7 +149,11 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
 
                 auto tag   = header.substr(0, space_separator);
                 auto value = header.substr(space_separator + 1, std::string::npos);
-                if (tag == "Basic") {
+                // The auth-scheme token is case-insensitive (RFC 7235 s2.1).
+                std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if (tag == "basic") {
                     // The Basic tag is processed to extract username and password
                     found_basic_security = true;
                     auto decoded         = ecf::decode_base64(value);
@@ -148,7 +161,7 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
                     username             = decoded.substr(0, colon_separator);
                     password             = decoded.substr(colon_separator + 1, std::string::npos);
                 }
-                else if (tag == "Bearer") {
+                else if (tag == "bearer") {
                     // Verify the OIDC access token in-server and derive identity + roles from the
                     // VERIFIED claims. Reject (401) if verification fails or OIDC is not configured.
                     if (oidc == nullptr || !oidc->enabled()) {
@@ -181,6 +194,11 @@ void handle_request(const boost::beast::http::request<Body, boost::beast::http::
             identity = ecf::Identity::make_user(username, password);
         }
         else {
+            if (request.find(boost::beast::http::field::authorization) != std::end(request)) {
+                LOG_ERROR("HttpServer::handle_request",
+                          "An Authorization header is present but was not usable "
+                          "(unrecognised scheme?); falling back to the inbound command identity");
+            }
             LOG_DEBUG("HttpServer::handle_request", "Identity extracted from inbound Command");
             auto cmd = inbound_request.get_cmd();
             identity = ecf::identify(cmd);
